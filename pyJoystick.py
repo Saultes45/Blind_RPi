@@ -7,6 +7,7 @@ import pygame
 from pygame.locals import *
 from sense_hat import SenseHat
 from time import sleep
+from time import time
 from collections import deque #optimized for pulling and pushing on both ends
 from zx_sensor import ZxSensor
 import random
@@ -15,6 +16,104 @@ import subprocess
 import os 
 from colour import Color
 import math
+
+import RPi.GPIO as GPIO
+from gpiozero import Buzzer
+
+# ------------------- Sounds ---------------------------
+
+#making sure the output is 2.5# jack
+subprocess.call('sudo amixer cset numid=3 1'.split(" ")) #no output
+
+#volume to 100%
+subprocess.call('amixer set PCM -- 100%'.split(" ")) #no output
+
+# ------------------- Audio buzzer #1 ---------------------------
+buzzer=19
+
+#Disable warnings (optional)
+GPIO.setwarnings(False)
+#Select GPIO mode
+GPIO.setmode(GPIO.BCM)
+#Set buzzer - pin 19 as output
+
+GPIO.setup(buzzer, GPIO.OUT)
+
+p = GPIO.PWM(buzzer, 50)  # channel=12 frequency=50Hz
+p.start(0)
+try:
+    for dc in range(0, 101, 5):
+        p.ChangeDutyCycle(dc)
+        sleep(0.1)
+    for dc in range(100, -1, -5):
+        p.ChangeDutyCycle(dc)
+        sleep(0.1)
+except KeyboardInterrupt:
+    pass
+p.stop()
+GPIO.cleanup()
+
+# ------------------- Audio buzzer #2 ----------------------------
+##https://gist.github.com/mandyRae/459ae289cdfcf6d98a6b
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setwarnings(False)
+
+GPIO.setup(buzzer, GPIO.OUT)
+
+tone1 = GPIO.PWM(buzzer, 100)
+
+#50 seems to be the all around best value for duty cycle for buzzers
+tone1.start(50)
+
+#Note frequencies, starting with a C
+#speaker works good from 32hz to about 500hz, so the first four octaves here, fifth octave just for fun
+#in case you're not familiar with musical notation, the 'b' after some of these indicates a flat so 'db' is 'd-flat'
+c = [32, 65, 131, 262, 523]
+db= [34, 69, 139, 277, 554]
+d = [36, 73, 147, 294, 587]
+eb= [37, 78, 156, 311, 622]
+e = [41, 82, 165, 330, 659]
+f = [43, 87, 175, 349, 698]
+gb= [46, 92, 185, 370, 740]
+g = [49, 98, 196, 392, 784]
+ab= [52, 104, 208, 415, 831]
+a = [55, 110, 220, 440, 880]
+bb= [58, 117, 223, 466, 932]
+b = [61, 123, 246, 492, 984]
+
+#notes of two scales, feel free to add more
+cmajor = [c, d, e, f, g, a, b]
+aminor = [a, b, c, d, e, f, g]
+
+def playScale(scale, pause):
+    for i in range(0, 5):
+        for note in scale:
+            tone1.ChangeFrequency(note[i])
+            time.sleep(pause)
+    tone1.stop()
+ 
+#call the playScale function   
+#playScale(aminor, 0.5)
+
+#Star Wars Theme -- Key of C
+starwars_notes = [c[1], g[1], f[1], e[1], d[1], c[2], g[1], f[1], e[1], d[1], c[2], g[1], 
+              f[1], e[1], f[1], d[1]]
+starwars_beats = [4,4,1,1,1,4,4,1,1,1,4,4,1,1,1,4]
+
+#London Bridges --Key of C
+londonbridges_notes = [g[1], a[1], g[1], f[1], e[1], f[1], g[1], d[1], e[1], f[1],
+                   e[1], f[1], g[1], g[1], a[1], g[1], f[1], e[1], f[1], g[1],
+                   d[1], g[1], e[1], c[1]]
+londonbridges_beats = [2, 0.5, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 2, 0.5, 1, 1, 1, 1,
+                   2, 2, 2, 1,1]
+
+def playSong(songnotes, songbeats, tempo):
+    tone1.ChangeDutyCycle(50)
+    for i in range(0, len(songnotes)):
+        tone1.ChangeFrequency(songnotes[i])
+        sleep(songbeats[i]*tempo)
+    tone1.ChangeDutyCycle(0)
 
 # ------------------- TODO ----------------------------
 
@@ -33,7 +132,7 @@ import math
 
 useHandAsInput = True
 lowWhite = 50
-numberOfLastPositions = 5
+numberOfLastPositions = 8
 HandX_max = 600
 HandZ_max = 600
 HandX_min = 0
@@ -42,8 +141,41 @@ mazeType = 2
 deadbandX = 2
 deadbandZ = 2
 doTests = False
-ZXMode = 1 ## 0 = Absolute,  1 = Relative
-ZXdifferencialDivider = 4 #more = slower maze movement
+ZXMode = 0 ## 0 = Absolute,  1 = Relative
+ZXdifferencialDividerX = 20 #more = slower maze movement
+ZXdifferencialDividerZ = 20 #more = slower maze movement
+ZXdifferencialoffsetX = -1 #more = more to left top
+ZXdifferencialoffsetZ = -1 #more = more to left top
+
+PerfectTime = 2.5
+BadTime = 5
+
+StartZoneSize = 3 # in number of LED
+TargetZoneSize = 2 # in number of LED
+NbrWalls = math.floor((8-StartZoneSize-TargetZoneSize-2)/2) + 2
+
+# ------------------- David maze ----------------------------
+X = [255, 0, 0]  # Red Start
+Y = [0, 255, 0]  # Green destination
+W = [255, 255, 255]  # White wall
+O = [0, 0, 0]  # Black void
+
+DavidMaze = [O] * (8*8)
+
+
+#Add destination
+DavidMaze[0:7*TargetZoneSize] = [Y] * (8*TargetZoneSize)
+
+#Add start
+DavidMaze[-7*StartZoneSize:] = [Y] * (8*StartZoneSize)
+
+#Add start and destination walls
+DavidMaze[7*TargetZoneSize+1:7*TargetZoneSize+1+8-1] = [W] * (8)
+DavidMaze[-7*StartZoneSize-1-1-8+1:-7*StartZoneSize-1] = [W] * (8)
+
+#add the other walls
+
+
 
 # ------------------- Colors ----------------------------
 blue    = Color("blue").get_rgb()
@@ -53,7 +185,7 @@ yellow  = [int(yellow[ii]*255) for ii in range(len(yellow))]
 red     = Color("red").get_rgb()
 red    = [int(red[ii]*255) for ii in range(len(red))]
 
-lowWhite_Following = [numberOfLastPositions] * 255
+lowWhite_Following = range(250, lowWhite, (lowWhite - 250) / numberOfLastPositions)
 
 # ------------------- BLE ----------------------------
 # Configure the BLE
@@ -71,32 +203,50 @@ except Exception:
 def BLESendEvent(eventType):
     if eventType == 0: #Start
         print "---> 3 Start beeps" # . . _
+        pygame.mixer.music.load("Start.wav")
+        pygame.mixer.music.play()
     elif eventType == 1: #Achievement (NOT victory)
         print "---> 1 ting" # . TF2 ting
+        pygame.mixer.music.load("Achivement.wav")
+        pygame.mixer.music.play()
     elif eventType == 2: #victory (NOT Achievement)
         print "---> 3 tings" # ... TF2 tings
+        pygame.mixer.music.load("Victory.wav")
+        pygame.mixer.music.play()
     elif eventType == 3: #wall bump 
-        print "---> 1 tongs" # . tongs
+        #print "---> 1 tongs" # . tongs
+        pygame.mixer.music.load("WallHit.wav")
+        pygame.mixer.music.play()
     elif eventType == 4: #fatality/end/general failure
         print "---> fail" # . . @@@
+        pygame.mixer.music.load("Fatality.wav")
+        pygame.mixer.music.play()
     elif eventType == 5: #waiting for input (why not?)
         print "---> 2 sharp spikes" #  | |
+        pygame.mixer.music.load("Wait.wav")
+        pygame.mixer.music.play()
+    elif eventType == 6: #moving
+        #print "---> smthg bip" # .
+        pygame.mixer.music.load("Move.wav")
+        pygame.mixer.music.play()
         
 def BLESendTargetPolar(r, Theta):
-    print "--->#p," + str(Theta) + "," + str(r) + "\\r\\n"
+##    print "--->#p," + str(Theta) + "," + str(r) + "\\r\\n"
+    sleep(0)
 
 def BLESendTargetCarthesianfromPolar(r, Theta):
     x = r * cos(Theta*math.pi/180)
     y = r * sin(Theta*math.pi/180)
-    print "--->#c," + str(x) + "," + str(y) + "\\r\\n"
+##    print "--->#c," + str(x) + "," + str(y) + "\\r\\n"
 
 def BLESendTargetPolarFromCarthesian(x, y):
     r = math.sqrt(math.pow((x),2) + math.pow((y),2))
     Theta = math.atan2(y,x)*180/math.pi
-    print "--->#p," + str(Theta) + "," + str(r) + "\\r\\n"   
+##    print "--->#p," + str(Theta) + "," + str(r) + "\\r\\n"   
 
 def BLESendTargetCarthesian(x, y):
-    print "--->#c," + str(x) + "," + str(y) + "\\r\\n"
+##    print "--->#c," + str(x) + "," + str(y) + "\\r\\n"
+    sleep(0)
 
 # ------------------- Maze 1 ----------------------------
 
@@ -404,6 +554,7 @@ if mazeType == 2:
 
 # ------------------- Main ----------------------------
 
+playSong(starwars_notes, starwars_beats, 0.2)
 
 SensorIsPresent = False
 
@@ -424,8 +575,6 @@ pygame.display.set_mode((100, 100))
 sense = SenseHat()
 sense.clear()
 
-TargetPosX = randint(0, 7)
-TargetPosY = randint(0, 7)
 TotalTravelledDistance = 0
  
 running = True
@@ -503,42 +652,70 @@ if doTests:
     sleep(0.25)
 
 
+##sense.set_pixels(DavidMaze)
+##sleep(5)
 
-sense.clear(0, 0, 0)
 
- 
-CursorPosx = 0
-CursorPosy = 0
-# display static crosshead (x)
-sense.set_pixels(x_Crosshead)
-#draw target
-print "target position is " + str(TargetPosX) + "/" +str(TargetPosY)
-sense.set_pixel(TargetPosX, TargetPosY, lowWhite, 0, 0)
-sense.set_pixel(CursorPosx, CursorPosy, 255, 255, 255)
-
+CursorPosx = randint(0, 7)
+CursorPosy = randint(0, 7)
 
 LastPositionsX = deque(numberOfLastPositions * [CursorPosx])
 LastPositionsY = deque(numberOfLastPositions * [CursorPosy])
 HandZ_prev = 0
 HandX_prev = 0
 
+# clear all drawings 
+sense.clear(0, 0, 0)
+
+# draw static crosshead (x)
+sense.set_pixels(x_Crosshead)
+
+# draw following crosshead (+)
+for cnt_col in range(0,8):
+    sense.set_pixel(CursorPosx, cnt_col, 0, 0, lowWhite)
+for cnt_lin in range(0,8):
+    sense.set_pixel(cnt_lin, CursorPosy, 0, 0, lowWhite)
+# draw current pos    
+sense.set_pixel(CursorPosx, CursorPosy, 255, 255, 255)
+
+# draw target
+TargetPosX = randint(0, 7)
+TargetPosY = randint(0, 7)
+while (TargetPosX == CursorPosx) and (TargetPosY == CursorPosy):
+    TargetPosX = randint(0, 7)
+    TargetPosY = randint(0, 7)
+print "target position is " + str(TargetPosX) + "/" + str(TargetPosY)
+sense.set_pixel(TargetPosX, TargetPosY, lowWhite, 0, 0)
+sense.set_pixel(CursorPosx, CursorPosy, 255, 255, 255)
+
+
 ## Z+ == Up
 ## Z- == Down
 ## X+ == Left
 ## X- == Right
 
+BLESendEvent(0)
+sense.show_letter("3", text_colour = blue, back_colour = yellow)
+sleep(1)
+sense.show_letter("2", text_colour = blue, back_colour = yellow)
+sleep(1)
+sense.show_letter("1", text_colour = blue, back_colour = yellow)
+sleep(1)
+sense.show_message("Go", text_colour = blue, back_colour = yellow)
 try :
+    start_time = time()
     while running:
         if useHandAsInput:
             if (SensorIsPresent):
-                sense.set_pixel(CursorPosx, CursorPosy,
-                                    0, 0, 0)  # Black 0,0,0 means OFF
+##                sense.set_pixel(CursorPosx, CursorPosy,
+##                                    0, 0, 0)  # Black 0,0,0 means OFF
                 # wait until position is available
+                WallHit = 0
                 while not (zx_sensor.position_available()):
                     sleep(0.1)
                 tempX = zx_sensor.read_x()
                 tempZ = zx_sensor.read_z()
-                print str(tempX) + "   /   " +str(tempZ)
+                #print str(tempX) + "   /   " +str(tempZ)
 
 
                 #Update LastPositions
@@ -556,11 +733,11 @@ try :
                 HandZ = max([tempZ, HandZ_min])
                 HandX = max([tempX, HandX_min])
                 
-                print "Hand pos " + str(HandX) + "/" + str(HandZ)
+                #print "Hand pos " + str(HandX) + "/" + str(HandZ)
 
                 if ZXMode == 1: ## 0 = Absolute,  1 = Relative
                     if (abs(HandZ - HandZ_prev) > deadbandZ) and (abs(HandX - HandX_prev) > deadbandX):
-                        print "Z difference " + str(HandZ - HandZ_prev) + " // X difference " + str(HandX - HandX_prev)
+                        #print "Z difference " + str(HandZ - HandZ_prev) + " // X difference " + str(HandX - HandX_prev)
                         if HandZ - HandZ_prev > 0 and CursorPosy < 7:
                             CursorPosy = CursorPosy + 1
                         elif HandZ - HandZ_prev < 0 and CursorPosy > 0:
@@ -572,11 +749,20 @@ try :
                         TotalTravelledDistance += 1
 
                 elif ZXMode == 0: ## 0 = Absolute,  1 = Relative
-                    if HandZ / ZXdifferencialDivider <= 7 and HandZ / ZXdifferencialDivider >= 0:
-                        CursorPosy = HandZ / ZXdifferencialDivider
-                    if HandX / ZXdifferencialDivider <= 7 and HandX / ZXdifferencialDivider >= 0:
-                        CursorPosx = CursorPosx + 1
-                    TotalTravelledDistance += 1
+                    tempZ = 7-(int(HandZ / ZXdifferencialDividerZ) + ZXdifferencialoffsetZ) #inverted axis
+                    tempX = 7-(int(HandX / ZXdifferencialDividerX) + ZXdifferencialoffsetX) #inverted axis
+
+                    if tempZ > 7 or tempZ < 0 or tempX > 7 or tempX < 0:# outside boundaries
+                        WallHit = 1
+                    else:
+                        TotalTravelledDistance += math.sqrt(math.pow(tempZ - CursorPosy,2) + math.pow(tempX - CursorPosx,2) )
+                        #BLESendEvent(6)
+
+                    if tempZ <= 7 and tempZ >= 0:
+                        CursorPosy = tempZ
+                    if tempX <= 7 and tempX >= 0:
+                        CursorPosx = tempX
+                    
                     
                             
                 HandZ_prev = HandZ
@@ -594,7 +780,7 @@ try :
                 # draw LastPositions
                 for cnt in range(0,numberOfLastPositions):
                     sense.set_pixel(LastPositionsX[cnt], LastPositionsY[cnt],
-                                0, lowWhite, 0)
+                                0, lowWhite_Following[cnt], 0)
 
                 
                 #draw target
@@ -606,16 +792,35 @@ try :
 
 
                 if (CursorPosx == TargetPosX) and (CursorPosy == TargetPosY):
-                    print "You are on the target"
+                    EllapsedTime = time() - start_time
+                    if EllapsedTime <= PerfectTime:
+                        BLESendEvent(2)
+                        sense.set_pixel(TargetPosX, TargetPosY, lowWhite, lowWhite, 0)
+                    elif EllapsedTime >  BadTime:
+                        BLESendEvent(4)
+                        for iii in range(0,1):
+                            sense.set_pixel(TargetPosX, TargetPosY, 0, 0, 0)
+                            sleep(0.25)
+                            sense.set_pixel(TargetPosX, TargetPosY, lowWhite, 0, 0)
+                            sleep(0.25)
+                    else:
+                        BLESendEvent(1)
+                    print "You are on the target: ellasped time " + str(EllapsedTime) + "s"
                     print "TotalTravelledDistance: " + str(TotalTravelledDistance)
                     TargetPosX = randint(0, 7)
                     TargetPosY = randint(0, 7)
+                    while (TargetPosX == CursorPosx) and (TargetPosY == CursorPosy):
+                        TargetPosX = randint(0, 7)
+                        TargetPosY = randint(0, 7)
                     #draw target
                     sense.set_pixel(TargetPosX, TargetPosY, lowWhite, 0, 0)
+                    start_time = time()
+                elif WallHit == 1:
+                    BLESendEvent(3)
 
 
 
-                sleep(0.1)
+                #sleep(0.1)
             else:
                 print "No sensor detected"
                 
@@ -659,7 +864,7 @@ try :
                     #draw LastPositions
                     for cnt in range(0,numberOfLastPositions):
                         sense.set_pixel(LastPositionsX[cnt], LastPositionsY[cnt],
-                                    0, lowWhite, 0)
+                                    0, lowWhite_Following[cnt], 0)
 
          
                     #draw target
@@ -672,6 +877,9 @@ try :
                         print "TotalTravelledDistance: " + str(TotalTravelledDistance)
                         TargetPosX = randint(0, 7)
                         TargetPosY = randint(0, 7)
+                        while (TargetPosX == CursorPosx) and (TargetPosY == CursorPosy):
+                            TargetPosX = randint(0, 7)
+                            TargetPosY = randint(0, 7)
                         #draw target
                         sense.set_pixel(TargetPosX, TargetPosY, lowWhite, 0, 0)
                 
